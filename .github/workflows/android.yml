@@ -2,7 +2,10 @@ name: Android CI
 
 on:
   push:
+    branches: [ "main", "fix/**" ]
+  pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
 
@@ -41,6 +44,7 @@ jobs:
           app/build/outputs/mapping/universalRelease/mapping.txt
 
     - name: Create AutoBuild Release
+      if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
       run: |
         GIT_DESCRIBE=$(git rev-parse --short HEAD)
         GIT_COMMIT_DATE=$(git log -1 --format=%cd --date=format:%y%m%d)
