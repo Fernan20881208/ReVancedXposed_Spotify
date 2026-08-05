@@ -35,6 +35,7 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         if (targetPackageName == null) targetPackageName = packageName
         return targetPackageName == packageName
     }
+
     override fun handleLoadPackage(lpparam: LoadPackageParam) {
         if (!lpparam.isFirstApplication) return
         if (!shouldHook(lpparam.packageName)) return
@@ -44,7 +45,7 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         XposedHelpers.findAndHookMethod(
             "android.app.Activity",
             lpparam.classLoader,
-            "onPostCreate", // Usiamo onPostCreate per essere sicuri che la UI sia pronta
+            "onPostCreate",
             android.os.Bundle::class.java,
             object : XC_MethodHook() {
                 @SuppressLint("DiscouragedApi")
@@ -52,11 +53,16 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     val activity = param.thisObject as Activity
                     if (!activity.javaClass.name.contains("MainActivity")) return
 
-                    // Spotify carica l'avatar in modo asincrono, aspettiamo che la vista sia disposta
                     val decorView = activity.window.decorView as ViewGroup
                     decorView.viewTreeObserver.addOnGlobalLayoutListener {
-                        // Proviamo a trovare l'avatar tramite ID comuni
-                        val avatarIds = listOf("profile_button", "profile_image", "avatar", "user_avatar", "faceview", "faceheader_image")
+                        val avatarIds = listOf(
+                            "profile_button",
+                            "profile_image",
+                            "avatar",
+                            "user_avatar",
+                            "faceview",
+                            "faceheader_image"
+                        )
                         var found = false
 
                         for (idName in avatarIds) {
@@ -70,7 +76,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                             }
                         }
 
-                        // Se non troviamo l'ID, cerchiamo la prima ImageView in alto a sinistra
                         if (!found) {
                             findAvatarRecursive(decorView, activity)
                         }
@@ -81,8 +86,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
         inContext(lpparam) { app ->
             this.app = app
-
-            // Carichiamo le preferenze una volta sola
             val prefs = app.getSharedPreferences("spotify_prefs", 0)
 
             if (isReVancedPatched(lpparam)) {
@@ -91,55 +94,46 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
             }
             Utils.showToastLong("ReVanced Xposed FE is initializing, please wait...")
 
-            // --- BLOCCO PREMIUM ---
-            // Ora è isolato: se Roundy sopra crasha, questo verrà comunque eseguito!
             try {
                 if (prefs.getBoolean("enable_premium", true)) {
                     hooksByPackage[lpparam.packageName]?.invoke()?.Hook()
                 }
-            } catch (e: Exception) {
-                XposedBridge.log("Mod Premium fallita: ${e.message}")
+            } catch (e: Throwable) {
+                XposedBridge.log("Mod Premium fallita: ${e.javaClass.simpleName}: ${e.message}")
             }
 
-            // --- BLOCCO: AD BLOCK ---
             try {
-                // Puoi aggiungere "enable_adblock" nel tuo SettingsSheet più tardi
                 if (prefs.getBoolean("enable_adblock", true)) {
                     AdBlockHook(lpparam).hook()
                     XposedBridge.log("AdBlocker: Modulo attivato")
                 }
-            } catch (e: Exception) {
-                XposedBridge.log("AdBlocker fallito: ${e.message}")
+            } catch (e: Throwable) {
+                XposedBridge.log("AdBlocker fallito: ${e.javaClass.simpleName}: ${e.message}")
             }
 
-            // --- BLOCCO MONET ---
             try {
                 if (prefs.getBoolean("enable_monet", true)) {
                     ThemeHook(app, lpparam).hook()
                 }
-            } catch (e: Exception) {
-                XposedBridge.log("Mod Monet fallita: ${e.message}")
+            } catch (e: Throwable) {
+                XposedBridge.log("Mod Monet fallita: ${e.javaClass.simpleName}: ${e.message}")
             }
 
-            // --- BLOCCO ROUNDY (Il sospettato numero 1) ---
             try {
                 if (prefs.getBoolean("enable_round_ui", true)) {
                     RoundyUIHook(lpparam).hook()
                 }
-            } catch (e: Exception) {
-                XposedBridge.log("Mod Roundy fallita: ${e.message}")
+            } catch (e: Throwable) {
+                XposedBridge.log("Mod Roundy fallita: ${e.javaClass.simpleName}: ${e.message}")
             }
-            
         }
     }
 
-    // Funzione per impostare il listener e dare feedback
     private fun setModLongClickListener(view: View, activity: Activity) {
         if (view.tag == "mod_hooked") return
         view.tag = "mod_hooked"
 
         view.setOnLongClickListener {
-            // Se la view cliccata è un contenitore (ViewGroup), cerchiamo l'immagine dentro
             val realView = if (it is ViewGroup && it.isNotEmpty()) {
                 it.getChildAt(0)
             } else {
@@ -152,12 +146,10 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         }
     }
 
-    // Cerca l'immagine profilo basandosi sulla posizione (Top-Left)
     private fun findAvatarRecursive(view: View, activity: Activity) {
         if (view is ImageView || view.contentDescription?.toString()?.contains("Profilo", true) == true) {
             val location = IntArray(2)
             view.getLocationOnScreen(location)
-            // L'avatar è solitamente entro i primi 150px dall'alto e 150px da sinistra
             if (location[0] < 150 && location[1] < 200 && view.width > 0) {
                 setModLongClickListener(view, activity)
                 return
@@ -190,10 +182,21 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 }
 
 fun inContext(lpparam: LoadPackageParam, f: (Application) -> Unit) {
-    val appClazz = XposedHelpers.findClass(lpparam.appInfo.className, lpparam.classLoader)
-    XposedBridge.hookMethod(appClazz.getMethod("onCreate"), object : XC_MethodHook() {
+    val classLoader = lpparam.classLoader ?: return
+    val appClassName = lpparam.appInfo.className
+    val appClazz = if (appClassName.isNullOrBlank()) {
+        Application::class.java
+    } else {
+        XposedHelpers.findClass(appClassName, classLoader)
+    }
+
+    val onCreateMethod = appClazz.methods.firstOrNull {
+        it.name == "onCreate" && it.parameterTypes.isEmpty()
+    } ?: throw NoSuchMethodException("${appClazz.name}.onCreate() not found")
+
+    XposedBridge.hookMethod(onCreateMethod, object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val app = param.thisObject as Application
+            val app = param.thisObject as? Application ?: return
             Utils.setContext(app)
             f(app)
         }
