@@ -6,8 +6,6 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import io.github.chsbuffer.revancedxposed.BaseHook
 import io.github.chsbuffer.revancedxposed.injectHostClassLoaderToSelf
-import io.github.chsbuffer.revancedxposed.spotify.misc.UnlockPremium
-import io.github.chsbuffer.revancedxposed.spotify.misc.logout.LogOutPatch
 import io.github.chsbuffer.revancedxposed.spotify.misc.privacy.SanitizeSharingLinks
 import io.github.chsbuffer.revancedxposed.spotify.misc.widgets.FixThirdPartyLaunchersWidgets
 
@@ -16,10 +14,13 @@ class SpotifyHook(app: Application, lpparam: LoadPackageParam) : BaseHook(app, l
     override val hooks = arrayOf(
         ::Extension,
         ::SanitizeSharingLinks,
-        ::UnlockPremium,
-        ::LogOutPatch,
         ::FixThirdPartyLaunchersWidgets,
-        //::NHB
+        // Account-state hooks are intentionally disabled in this stability build.
+        // They intercept authentication/session responses and can leave Spotify
+        // logged out or stuck on the onboarding screen after a server rejection.
+        // ::UnlockPremium,
+        // ::LogOutPatch,
+        // ::NHB
     )
 
     // ══════════════════════════════════════════════════════
@@ -31,10 +32,10 @@ class SpotifyHook(app: Application, lpparam: LoadPackageParam) : BaseHook(app, l
 
     // ══════════════════════════════════════════════════════
     // NHB → NATIVE HTTP BLOCK
+    // Disabled by default. Kept only for source compatibility.
     // ══════════════════════════════════════════════════════
     fun NHB() {
         runCatching {
-
             val cl = classLoader
 
             val httpConnectionImpl =
@@ -63,10 +64,8 @@ class SpotifyHook(app: Application, lpparam: LoadPackageParam) : BaseHook(app, l
                     }
                 }
             )
-
         }.onFailure {
             XposedBridge.log("NHB error -> ${it.message}")
         }
     }
 }
-
